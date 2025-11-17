@@ -1,56 +1,15 @@
-import { TraceEventType } from '@lobechat/types';
-import { UIChatMessage } from '@lobechat/types';
+import { TraceEventType, UIChatMessage } from '@lobechat/types';
 import * as lobeUIModules from '@lobehub/ui';
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { mutate } from 'swr';
+import { act, renderHook } from '@testing-library/react';
 import { Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { messageService } from '@/services/message';
 import { topicService } from '@/services/topic';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 
-import { useChatStore } from '../../store';
-
-vi.stubGlobal(
-  'fetch',
-  vi.fn(() => Promise.resolve(new Response('mock'))),
-);
-
-vi.mock('zustand/traditional');
-// Mock service
-vi.mock('@/services/message', () => ({
-  messageService: {
-    getMessages: vi.fn(),
-    updateMessageError: vi.fn(),
-    removeMessage: vi.fn(() => Promise.resolve({ success: true, messages: [] })),
-    removeMessagesByAssistant: vi.fn(),
-    removeMessages: vi.fn(() => Promise.resolve({ success: true, messages: [] })),
-    createMessage: vi.fn(() => Promise.resolve({ id: 'new-message-id', messages: [] })),
-    updateMessage: vi.fn(() => Promise.resolve({ success: true, messages: [] })),
-    updateMessageMetadata: vi.fn(() => Promise.resolve({ success: true, messages: [] })),
-    updateMessagePluginError: vi.fn(() => Promise.resolve({ success: true, messages: [] })),
-    updateMessageRAG: vi.fn(() => Promise.resolve({ success: true, messages: [] })),
-    removeAllMessages: vi.fn(() => Promise.resolve()),
-  },
-}));
-vi.mock('@/services/topic', () => ({
-  topicService: {
-    createTopic: vi.fn(() => Promise.resolve()),
-    removeTopic: vi.fn(() => Promise.resolve()),
-  },
-}));
-
-const realRefreshMessages = useChatStore.getState().refreshMessages;
-// Mock state
-const mockState = {
-  activeId: 'session-id',
-  activeTopicId: 'topic-id',
-  messages: [],
-  refreshMessages: vi.fn(),
-  refreshTopic: vi.fn(),
-  internal_coreProcessMessage: vi.fn(),
-  saveToTopic: vi.fn(),
-};
+import { useChatStore } from '../../../../store';
+import './setup';
+import { mockState } from './setup';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -59,11 +18,10 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env.NEXT_PUBLIC_BASE_PATH = undefined;
-
   vi.restoreAllMocks();
 });
 
-describe('chatMessage actions', () => {
+describe('MessagePublicApiAction', () => {
   describe('addAIMessage', () => {
     it('should return early if activeId is undefined', async () => {
       useChatStore.setState({ activeId: undefined });
@@ -556,13 +514,14 @@ describe('chatMessage actions', () => {
 
   describe('clearMessage', () => {
     beforeEach(() => {
-      vi.clearAllMocks(); // 清除 mocks
-      useChatStore.setState(mockState, false); // 重置 state
+      vi.clearAllMocks();
+      useChatStore.setState(mockState, false);
     });
 
     afterEach(() => {
-      vi.restoreAllMocks(); // 恢复所有模拟
+      vi.restoreAllMocks();
     });
+
     it('clearMessage should remove messages from the active session and topic', async () => {
       const { result } = renderHook(() => useChatStore());
       const clearSpy = vi.spyOn(result.current, 'clearMessage');
@@ -591,7 +550,6 @@ describe('chatMessage actions', () => {
       expect(refreshTopicSpy).toHaveBeenCalled();
       expect(switchTopicSpy).toHaveBeenCalled();
 
-      // 检查 activeTopicId 是否被清除，需要在状态更新后进行检查
       expect(useChatStore.getState().activeTopicId).toBeNull();
     });
 
@@ -604,7 +562,7 @@ describe('chatMessage actions', () => {
         await result.current.clearMessage();
       });
 
-      expect(mockState.activeTopicId).not.toBeUndefined(); // 确保在测试前 activeTopicId 存在
+      expect(mockState.activeTopicId).not.toBeUndefined();
       expect(refreshTopicSpy).toHaveBeenCalled();
       expect(mockState.refreshMessages).toHaveBeenCalled();
       expect(topicService.removeTopic).toHaveBeenCalledWith(mockState.activeTopicId);
@@ -612,7 +570,7 @@ describe('chatMessage actions', () => {
     });
   });
 
-  describe('toggleMessageEditing ', () => {
+  describe('toggleMessageEditing', () => {
     it('should add message id to messageEditingIds when editing is true', () => {
       const { result } = renderHook(() => useChatStore());
       const messageId = 'message-id';
@@ -660,169 +618,6 @@ describe('chatMessage actions', () => {
     });
   });
 
-  describe('optimisticUpdateMessageContent', () => {
-    it('should call messageService.optimisticUpdateMessageContent with correct parameters', async () => {
-      const { result } = renderHook(() => useChatStore());
-      const messageId = 'message-id';
-      const newContent = 'Updated content';
-
-      const spy = vi.spyOn(messageService, 'updateMessage');
-      await act(async () => {
-        await result.current.optimisticUpdateMessageContent(messageId, newContent);
-      });
-
-      expect(spy).toHaveBeenCalledWith(
-        messageId,
-        { content: newContent },
-        { sessionId: 'session-id', topicId: 'topic-id' },
-      );
-    });
-
-    it('should dispatch message update action', async () => {
-      const { result } = renderHook(() => useChatStore());
-      const messageId = 'message-id';
-      const newContent = 'Updated content';
-      const internal_dispatchMessageSpy = vi.spyOn(result.current, 'internal_dispatchMessage');
-
-      await act(async () => {
-        await result.current.optimisticUpdateMessageContent(messageId, newContent);
-      });
-
-      expect(internal_dispatchMessageSpy).toHaveBeenCalledWith({
-        id: messageId,
-        type: 'updateMessage',
-        value: { content: newContent },
-      });
-    });
-
-    it('should replace messages after updating content', async () => {
-      const { result } = renderHook(() => useChatStore());
-      const messageId = 'message-id';
-      const newContent = 'Updated content';
-      const replaceMessagesSpy = vi.spyOn(result.current, 'replaceMessages');
-
-      await act(async () => {
-        await result.current.optimisticUpdateMessageContent(messageId, newContent);
-      });
-
-      expect(replaceMessagesSpy).toHaveBeenCalledWith(
-        [],
-        expect.objectContaining({
-          sessionId: 'session-id',
-          topicId: 'topic-id',
-        }),
-      );
-    });
-  });
-
-  describe('refreshMessages action', () => {
-    beforeEach(() => {
-      vi.mock('swr', async () => {
-        const actual = await vi.importActual('swr');
-        return {
-          ...(actual as any),
-          mutate: vi.fn(),
-        };
-      });
-    });
-    afterEach(() => {
-      // 在每个测试用例开始前恢复到实际的 SWR 实现
-      vi.resetAllMocks();
-    });
-    it('should refresh messages by calling mutate for both session and group types', async () => {
-      useChatStore.setState({ refreshMessages: realRefreshMessages });
-
-      const { result } = renderHook(() => useChatStore());
-      const activeId = useChatStore.getState().activeId;
-      const activeTopicId = useChatStore.getState().activeTopicId;
-
-      // 在这里，我们不需要再次模拟 mutate，因为它已经在顶部被模拟了
-      await act(async () => {
-        await result.current.refreshMessages();
-      });
-
-      // 确保 mutate 调用了正确的参数（session 和 group 两次）
-      expect(mutate).toHaveBeenCalledWith([
-        'SWR_USE_FETCH_MESSAGES',
-        activeId,
-        activeTopicId,
-        'session',
-      ]);
-      expect(mutate).toHaveBeenCalledWith([
-        'SWR_USE_FETCH_MESSAGES',
-        activeId,
-        activeTopicId,
-        'group',
-      ]);
-      expect(mutate).toHaveBeenCalledTimes(2);
-    });
-    it('should handle errors during refreshing messages', async () => {
-      useChatStore.setState({ refreshMessages: realRefreshMessages });
-      const { result } = renderHook(() => useChatStore());
-
-      // 设置模拟错误
-      (mutate as Mock).mockImplementation(() => {
-        throw new Error('Mutate error');
-      });
-
-      await act(async () => {
-        await expect(result.current.refreshMessages()).rejects.toThrow('Mutate error');
-      });
-
-      // 确保恢复 mutate 的模拟，以免影响其他测试
-      (mutate as Mock).mockReset();
-    });
-  });
-
-  describe('useFetchMessages hook', () => {
-    // beforeEach(() => {
-    //   vi.mocked(useSWR).mockRestore();
-    // });
-
-    it('should fetch messages for given session and topic ids', async () => {
-      const sessionId = 'session-id';
-      const topicId = 'topic-id';
-      const messages = [{ id: 'message-id', content: 'Hello' }];
-
-      // 设置模拟返回值
-      (messageService.getMessages as Mock).mockResolvedValue(messages);
-
-      const { result } = renderHook(() =>
-        useChatStore().useFetchMessages(true, sessionId, topicId),
-      );
-
-      // 等待异步操作完成
-      await waitFor(() => {
-        expect(result.current.data).toEqual(messages);
-      });
-    });
-  });
-
-  describe('internal_toggleMessageLoading', () => {
-    it('should add message id to messageLoadingIds when loading is true', () => {
-      const { result } = renderHook(() => useChatStore());
-      const messageId = 'message-id';
-
-      act(() => {
-        result.current.internal_toggleMessageLoading(true, messageId);
-      });
-
-      expect(result.current.messageLoadingIds).toContain(messageId);
-    });
-
-    it('should remove message id from messageLoadingIds when loading is false', () => {
-      const { result } = renderHook(() => useChatStore());
-      const messageId = 'ddd-id';
-
-      act(() => {
-        result.current.internal_toggleMessageLoading(true, messageId);
-        result.current.internal_toggleMessageLoading(false, messageId);
-      });
-
-      expect(result.current.messageLoadingIds).not.toContain(messageId);
-    });
-  });
-
   describe('modifyMessageContent', () => {
     it('should call internal_traceMessage with correct parameters before updating', async () => {
       const messageId = 'message-id';
@@ -854,100 +649,6 @@ describe('chatMessage actions', () => {
       expect(spy).toHaveBeenCalledWith(messageId, {
         eventType: 'Modify Message',
         nextContent: 'Updated content',
-      });
-    });
-  });
-
-  describe('OptimisticUpdateContext isolation', () => {
-    beforeEach(() => {
-      vi.clearAllMocks();
-    });
-
-    it('optimisticUpdateMessageContent should use context sessionId/topicId', async () => {
-      const { result } = renderHook(() => useChatStore());
-      const messageId = 'message-id';
-      const content = 'Updated content';
-      const contextSessionId = 'context-session-id';
-      const contextTopicId = 'context-topic-id';
-
-      const updateMessageSpy = vi.spyOn(messageService, 'updateMessage');
-
-      await act(async () => {
-        await result.current.optimisticUpdateMessageContent(messageId, content, undefined, {
-          sessionId: contextSessionId,
-          topicId: contextTopicId,
-        });
-      });
-
-      expect(updateMessageSpy).toHaveBeenCalledWith(
-        messageId,
-        { content, tools: undefined },
-        { sessionId: contextSessionId, topicId: contextTopicId },
-      );
-    });
-
-    it('optimisticUpdateMessageError should use context sessionId/topicId', async () => {
-      const { result } = renderHook(() => useChatStore());
-      const messageId = 'message-id';
-      const error = { message: 'Error occurred', type: 'error' as any };
-      const contextSessionId = 'context-session';
-      const contextTopicId = 'context-topic';
-
-      const updateMessageSpy = vi.spyOn(messageService, 'updateMessage');
-
-      await act(async () => {
-        await result.current.optimisticUpdateMessageError(messageId, error, {
-          sessionId: contextSessionId,
-          topicId: contextTopicId,
-        });
-      });
-
-      expect(updateMessageSpy).toHaveBeenCalledWith(
-        messageId,
-        { error },
-        { sessionId: contextSessionId, topicId: contextTopicId },
-      );
-    });
-
-    it('optimisticDeleteMessage should use context sessionId/topicId', async () => {
-      const { result } = renderHook(() => useChatStore());
-      const messageId = 'message-id';
-      const contextSessionId = 'context-session';
-      const contextTopicId = 'context-topic';
-
-      const removeMessageSpy = vi.spyOn(messageService, 'removeMessage');
-
-      await act(async () => {
-        await result.current.optimisticDeleteMessage(messageId, {
-          sessionId: contextSessionId,
-          topicId: contextTopicId,
-        });
-      });
-
-      expect(removeMessageSpy).toHaveBeenCalledWith(messageId, {
-        sessionId: contextSessionId,
-        topicId: contextTopicId,
-      });
-    });
-
-    it('optimisticDeleteMessages should use context sessionId/topicId', async () => {
-      const { result } = renderHook(() => useChatStore());
-      const ids = ['id-1', 'id-2'];
-      const contextSessionId = 'context-session';
-      const contextTopicId = 'context-topic';
-
-      const removeMessagesSpy = vi.spyOn(messageService, 'removeMessages');
-
-      await act(async () => {
-        await result.current.optimisticDeleteMessages(ids, {
-          sessionId: contextSessionId,
-          topicId: contextTopicId,
-        });
-      });
-
-      expect(removeMessagesSpy).toHaveBeenCalledWith(ids, {
-        sessionId: contextSessionId,
-        topicId: contextTopicId,
       });
     });
   });
